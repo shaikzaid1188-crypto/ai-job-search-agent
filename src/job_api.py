@@ -1,7 +1,9 @@
 def fetch_jobs(tag: str = "python", limit: int = 10) -> list:
     """
-    Returns custom, curated job postings tailored to your preferred companies and roles.
+    Returns curated job postings and supports both
+    simple keywords and natural-language search queries.
     """
+
     custom_jobs = [
         {
             "title": "Junior Python Developer",
@@ -45,19 +47,59 @@ def fetch_jobs(tag: str = "python", limit: int = 10) -> list:
         }
     ]
 
-    # Filter based on search input
-    tag_lower = tag.lower().strip()
+    query = tag.lower().strip()
+
+    # Words that don't help identify a job
+    stop_words = {
+        "find",
+        "me",
+        "jobs",
+        "job",
+        "for",
+        "a",
+        "an",
+        "the",
+        "in",
+        "at",
+        "with",
+        "and",
+        "or",
+        "to",
+        "of",
+        "beginner",
+        "entry",
+        "level",
+        "developer",
+        "developers",
+        "please"
+    }
+
+    # Extract useful words from the query
+    keywords = [
+        word.strip(".,!?")
+        for word in query.split()
+        if word.strip(".,!?") not in stop_words
+    ]
+
     filtered = []
-    
+
     for job in custom_jobs:
+
         tags = [t.lower() for t in job["tags"]]
         title = job["title"].lower()
         company = job["company"].lower()
-        
-        # Match if search keyword is in tags, title, or company name
-        if tag_lower in tags or tag_lower in title or tag_lower in company:
+        description = job["description"].lower()
+
+        # Check whether any keyword matches the job
+        matched = any(
+            keyword in tags
+            or keyword in title
+            or keyword in company
+            or keyword in description
+            for keyword in keywords
+        )
+
+        if matched:
             filtered.append(job)
-            
-    # If no specific keyword matched, return all jobs up to limit
-    results = filtered if filtered else custom_jobs
-    return results[:limit]
+
+    return filtered[:limit]
