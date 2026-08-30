@@ -1,218 +1,71 @@
-import os
-from dotenv import load_dotenv
-from google import genai
+import re
 
-load_dotenv()
+# Comprehensive list of industry-standard tech and domain skills
+TECH_SKILLS_DATABASE = [
+    # Languages
+    "python", "java", "c++", "c#", "c", "javascript", "typescript", "ruby", "php", "go", "rust", "scala", "kotlin", "swift",
+    # Web & Frameworks
+    "react", "angular", "vue", "next.js", "django", "fastapi", "flask", "spring boot", "express", "node.js", "html", "css", "tailwind",
+    # Databases & Big Data
+    "sql", "mysql", "postgresql", "mongodb", "redis", "elasticsearch", "sqlite", "oracle", "snowflake", "spark", "hadoop",
+    # AI / ML / Data Science
+    "machine learning", "deep learning", "nlp", "computer vision", "pandas", "numpy", "scikit-learn", "tensorflow", "pytorch", 
+    "power bi", "tableau", "data analysis", "data visualization", "data science", "llm", "genai",
+    # Cloud & DevOps
+    "aws", "azure", "gcp", "docker", "kubernetes", "ci/cd", "git", "github", "linux", "terraform", "rest api", "graphql", "microservices"
+]
 
-API_KEY = os.getenv("GEMINI_API_KEY")
-
-if not API_KEY:
-    raise ValueError("GEMINI_API_KEY is not configured in the .env file.")
-
-client = genai.Client(api_key=API_KEY)
-
-
-def extract_skills_from_resume(resume_text: str) -> list[str]:
-    """Extract skills using Gemini with a local fallback."""
-
-    if not resume_text.strip():
+def extract_skills_from_resume(resume_text: str) -> list:
+    """Extracts known tech skills found in the parsed resume text using regex boundaries."""
+    if not resume_text:
         return []
+        
+    text_lower = resume_text.lower()
+    detected_skills = []
+    
+    for skill in TECH_SKILLS_DATABASE:
+        # Match standalone words or terms cleanly
+        pattern = r'(?<!\w)' + re.escape(skill) + r'(?!\w)'
+        if re.search(pattern, text_lower):
+            detected_skills.append(skill.title())
+            
+    return sorted(list(set(detected_skills)))
 
-    prompt = f"""
-You are a resume skill extraction assistant.
-
-Extract the important skills from the following resume.
-
-Include:
-- Programming languages
-- Frameworks and libraries
-- Databases
-- Cloud and developer tools
-- AI/ML skills
-- Other relevant technical skills
-- Important professional skills
-
-Return ONLY a comma-separated list of skills.
-Do not add explanations.
-
-Resume:
-{resume_text}
-"""
-
-    try:
-        response = client.models.generate_content(
-            model="gemini-3.6-flash",
-            contents=prompt,
-        )
-
-        skills_text = response.text.strip()
-
-        skills = [
-            skill.strip()
-            for skill in skills_text.split(",")
-            if skill.strip()
-        ]
-
-        return skills
-
-    except Exception as e:
-        print(f"Gemini skill extraction failed: {e}")
-
-        # Local fallback when Gemini quota is unavailable
-        known_skills = [
-            "python",
-            "java",
-            "javascript",
-            "typescript",
-            "c",
-            "c++",
-            "c#",
-            "sql",
-            "html",
-            "css",
-            "react",
-            "node",
-            "node.js",
-            "fastapi",
-            "django",
-            "flask",
-            "spring",
-            "machine learning",
-            "deep learning",
-            "artificial intelligence",
-            "ai",
-            "nlp",
-            "rag",
-            "langchain",
-            "gemini",
-            "git",
-            "github",
-            "docker",
-            "aws",
-            "azure",
-            "mongodb",
-            "mysql",
-            "postgresql",
-            "power bi",
-            "streamlit",
-        ]
-
-        resume_lower = resume_text.lower()
-
-        fallback_skills = []
-
-        for skill in known_skills:
-            if skill in resume_lower:
-                fallback_skills.append(skill.title())
-
-        return fallback_skills
-
-
-def calculate_job_match(
-    resume_skills: list[str],
-    job: dict
-) -> dict:
-    """
-    Calculate job match using local skill matching.
-
-    This avoids consuming Gemini API quota.
-    """
-
+def calculate_job_match(resume_skills: list, job_tags: list, job_description: str) -> int:
+    """Calculates a realistic match percentage based on skills overlap and role keywords."""
     if not resume_skills:
-        return {
-            "score": 0,
-            "reason": "No resume skills were detected."
-        }
+        return 0
+    
+    resume_skills_lower = set([s.lower() for s in resume_skills])
+    job_tags_lower = set([t.lower() for t in job_tags])
+    
+    # Check overlap with tags
+    tag_overlap = resume_skills_lower.intersection(job_tags_lower)
+    
+    # Check description mentions
+    desc_lower = job_description.lower()
+    desc_matches = sum(1 for skill in resume_skills_lower if skill in desc_lower)
+    
+    if not job_tags:
+        score = min(int((desc_matches / max(len(resume_skills_lower), 1)) * 100) + 30, 95)
+        return score
 
-    job_tags = job.get("tags", [])
+    tag_score = (len(tag_overlap) / len(job_tags_lower)) * 70
+    desc_score = min((desc_matches / max(len(job_tags_lower), 1)) * 30, 30)
+    
+    final_score = int(tag_score + desc_score)
+    # Clamp score realistically between 15% and 98%
+    return min(max(final_score, 15), 98)
 
-    candidate_skills = {
-        skill.lower().strip()
-        for skill in resume_skills
-    }
-
-    required_skills = {
-        skill.lower().strip()
-        for skill in job_tags
-    }
-
-    matched = candidate_skills.intersection(required_skills)
-    missing = required_skills - candidate_skills
-
-    if required_skills:
-        score = round(
-            (len(matched) / len(required_skills)) * 100
-        )
-    else:
-        score = 0
-
-    if matched:
-        matched_text = ", ".join(
-            sorted(skill.title() for skill in matched)
-        )
-    else:
-        matched_text = "none"
-
-    if missing:
-        missing_text = ", ".join(
-            sorted(skill.title() for skill in missing)
-        )
-    else:
-        missing_text = "none"
-
-    reason = (
-        f"Matched skills: {matched_text}. "
-        f"Missing job skills: {missing_text}."
-    )
-
+def analyze_skill_gap(resume_skills: list, job_tags: list) -> dict:
+    """Categorizes skills into matching and missing recommendations."""
+    resume_set = set([s.lower() for s in resume_skills])
+    job_set = set([t.lower() for t in job_tags])
+    
+    matching = [t.title() for t in job_set if t in resume_set]
+    missing = [t.title() for t in job_set if t not in resume_set]
+    
     return {
-        "score": score,
-        "reason": reason
-    }
-
-
-def analyze_skill_gap(
-    resume_skills: list[str],
-    job: dict
-) -> dict:
-    """
-    Analyze missing skills locally without using Gemini.
-    """
-
-    if not resume_skills:
-        return {
-            "missing_skills": [],
-            "recommendation": "Upload a resume with relevant skills."
-        }
-
-    job_tags = job.get("tags", [])
-
-    candidate_skills = {
-        skill.lower().strip()
-        for skill in resume_skills
-    }
-
-    missing = []
-
-    for skill in job_tags:
-        if skill.lower().strip() not in candidate_skills:
-            missing.append(skill)
-
-    if missing:
-        missing_text = ", ".join(missing)
-
-        recommendation = (
-            f"Focus on learning {missing_text}. "
-            "Build a practical project using these technologies "
-            "to gain hands-on experience."
-        )
-    else:
-        recommendation = (
-            "Your current skills cover the main requirements "
-            "listed for this job."
-        )
-
-    return {
-        "missing_skills": missing,
-        "recommendation": recommendation
+        "matching": matching,
+        "missing": missing
     }

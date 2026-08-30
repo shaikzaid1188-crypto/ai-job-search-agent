@@ -1,173 +1,110 @@
 import streamlit as st
 from src.parser import extract_text_from_pdf
 from src.job_api import fetch_jobs
-from src.ai_matcher import (
-    extract_skills_from_resume,
-    calculate_job_match,
-    analyze_skill_gap
-)
+from src.ai_matcher import extract_skills_from_resume, calculate_job_match, analyze_skill_gap
 
 st.set_page_config(
-    page_title="AI Job Search Agent",
+    page_title="AI Job Search & Resume Assistant",
+    page_icon="💼",
     layout="wide"
 )
 
-st.title("💼 AI Job Search & Resume Assistant")
-st.write(
-    "Upload your resume and discover matching job opportunities using AI."
-)
+st.title("💼 AI Job Search & Resume Matcher Assistant")
+st.write("Upload your resume to discover matching job opportunities, skill gap analysis, and tailored recommendations.")
 
-# ==============================
-# 1. RESUME UPLOAD
-# ==============================
-
-st.sidebar.header("1. Upload Resume")
-
-uploaded_file = st.sidebar.file_uploader(
-    "Choose a PDF Resume",
-    type=["pdf"]
-)
+# --- Sidebar: Resume Upload & Skill Discovery ---
+st.sidebar.header("📄 1. Upload Resume")
+uploaded_file = st.sidebar.file_uploader("Upload PDF Resume", type=["pdf"])
 
 resume_text = ""
-extracted_skills = []
+resume_skills = []
 
 if uploaded_file:
-
-    with st.spinner("Extracting resume text..."):
+    with st.sidebar.status("Processing Resume..."):
         resume_text = extract_text_from_pdf(uploaded_file)
-
-    if resume_text:
-        st.sidebar.success("Resume parsed successfully!")
-
-        with st.sidebar.expander("Preview Extracted Resume"):
-            st.text(resume_text[:1000] + "...")
-
-        # Gemini is used only for skill extraction
-        with st.spinner("AI is analyzing your resume..."):
-            extracted_skills = extract_skills_from_resume(resume_text)
-
-        if extracted_skills:
-            st.subheader("🤖 AI Extracted Skills")
-            st.write(", ".join(extracted_skills))
-        else:
-            st.warning("No skills could be extracted from the resume.")
-
+        resume_skills = extract_skills_from_resume(resume_text)
+    
+    st.sidebar.success(f"Extracted {len(resume_skills)} Skills!")
+    
+    if resume_skills:
+        st.sidebar.subheader("Detected Skills:")
+        st.sidebar.write(", ".join(resume_skills))
     else:
-        st.error("Could not extract text from the uploaded PDF.")
+        st.sidebar.warning("No standard tech skills detected. Consider expanding your resume content.")
 
+# --- Search & Filter Controls ---
+col_search, col_sort = st.columns([3, 1])
 
-# ==============================
-# 2. JOB SEARCH
-# ==============================
+with col_search:
+    search_query = st.text_input("🔍 Search roles, companies, or keywords (e.g., Python, AI, AWS, Google)", value="python")
 
-st.header("2. Live Job Search")
+with col_sort:
+    sort_by_match = st.selectbox("Sort By", ["Highest Match %", "Default Feed"])
 
-col1, col2 = st.columns([3, 1])
+# --- Fetch & Match Jobs ---
+job_listings = fetch_jobs(tag=search_query, limit=10)
 
-with col1:
-    search_keyword = st.text_input(
-        "Enter Job Role or Skill (e.g., Python, Data, React)",
-        value="python"
-    )
+# Process scores for each job
+enriched_jobs = []
+for job in job_listings:
+    score = calculate_job_match(resume_skills, job["tags"], job["description"]) if resume_skills else 0
+    gap = analyze_skill_gap(resume_skills, job["tags"])
+    
+    enriched_jobs.append({
+        **job,
+        "match_score": score,
+        "matching_skills": gap["matching"],
+        "missing_skills": gap["missing"]
+    })
 
-with col2:
-    search_button = st.button(
-        "Search Jobs",
-        use_container_width=True
-    )
+if sort_by_match == "Highest Match %" and resume_skills:
+    enriched_jobs.sort(key=lambda x: x["match_score"], reverse=True)
 
+# --- Main Job Feed Display ---
+st.subheader(f"📋 Available Opportunities ({len(enriched_jobs)})")
 
-if search_button or search_keyword:
+if not uploaded_file:
+    st.info("💡 Upload your resume on the left sidebar to unlock personalized AI Match Scores and Skill Gap recommendations.")
 
-    with st.spinner(f"Fetching {search_keyword} listings..."):
-        jobs = fetch_jobs(
-            tag=search_keyword,
-            limit=6
-        )
+for job in enriched_jobs:
+    with st.container(border=True):
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            st.markdown(f"### [{job['title']}]({job['url']})")
+            st.markdown(f"🏢 **{job['company']}** &nbsp;|&nbsp; 📍 {job['location']}")
+            st.write(job['description'])
+            
+            # Render Tags
+            tags_display = " ".join([f"`{t}`" for t in job["tags"]])
+            st.markdown(f"**Required Tags:** {tags_display}")
+            
+            # Skill Gap Analysis Display (When resume is provided)
+            if uploaded_file and resume_skills:
+                match_col, miss_col = st.columns(2)
+                with match_col:
+                    matching_str = ", ".join(job["matching_skills"]) if job["matching_skills"] else "None"
+                    st.markdown(f"✅ **Matching Skills:** `{matching_str}`")
+                with miss_col:
+                    missing_str = ", ".join(job["missing_skills"]) if job["missing_skills"] else "None"
+                    st.markdown(f"⚠️ **Missing Skills:** `{missing_str}`")
 
-    if jobs:
+        with col2:
+            if uploaded_file and resume_skills:
+                st.metric(label="AI Fit Score", value=f"{job['match_score']}%")
+                st.progress(job['match_score'] / 100)
+                
+                if job['match_score'] >= 70:
+                    st.success("High Fit")
+                elif job['match_score'] >= 40:
+                    st.warning("Moderate Fit")
+                else:
+                    st.error("Skill Gap")
+            else:
+                st.write("")
+                st.caption("Upload resume to calculate match score.")
+                
+            st.link_button("Apply on Company Portal ↗", job['url'], use_container_width=True)
 
-        st.subheader(f"Found {len(jobs)} Opportunities")
-
-        for job in jobs:
-
-            with st.container():
-
-                # Job title
-                st.markdown(
-                    f"### [{job['title']}]({job['url']})"
-                )
-
-                # Company and location
-                st.write(
-                    f"**Company:** {job['company']} | "
-                    f"**Location:** {job['location']}"
-                )
-
-                # Job tags
-                st.write(
-                    f"**Tags:** `{', '.join(job['tags'][:5])}`"
-                )
-
-                # Description
-                st.write(job['description'])
-
-                # ==============================
-                # AI JOB MATCHING
-                # ==============================
-
-                if extracted_skills:
-
-                    match_result = calculate_job_match(
-                        extracted_skills,
-                        job
-                    )
-
-                    st.metric(
-                        "🎯 AI Match Score",
-                        f"{match_result['score']}%"
-                    )
-
-                    st.info(
-                        f"**AI Analysis:** {match_result['reason']}"
-                    )
-
-                    # ==============================
-                    # SKILL GAP ANALYSIS
-                    # ==============================
-
-                    gap_result = analyze_skill_gap(
-                        extracted_skills,
-                        job
-                    )
-
-                    st.write("🧩 **Skill Gap Analysis**")
-
-                    if gap_result["missing_skills"]:
-
-                        st.write(
-                            "**Missing Skills:** "
-                            + ", ".join(
-                                gap_result["missing_skills"]
-                            )
-                        )
-
-                    else:
-
-                        st.success(
-                            "No major skill gaps detected."
-                        )
-
-                    st.write(
-                        f"**💡 Recommendation:** "
-                        f"{gap_result['recommendation']}"
-                    )
-
-                st.markdown("---")
-
-    else:
-
-        st.warning(
-            "No jobs found for that tag. "
-            "Try terms like 'python', 'react', or 'data'."
-        )
+st.markdown("---")
+st.caption("AI Job Search & Resume Matcher Assistant | Week 3 Project Build")

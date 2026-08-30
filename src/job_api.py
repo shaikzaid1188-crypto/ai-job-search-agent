@@ -1,51 +1,53 @@
 def fetch_jobs(tag: str = "python", limit: int = 10) -> list:
-    """
-    Returns custom, curated job postings tailored to your preferred companies and roles.
-    """
+    """Returns curated job postings with structured skill requirements."""
     custom_jobs = [
         {
+            "id": 1,
             "title": "Junior Python Developer",
             "company": "Google",
             "location": "Bengaluru, India / Remote",
             "url": "https://careers.google.com",
-            "tags": ["python", "django", "fastapi", "sql"],
-            "description": "Looking for an entry-level Python developer to build backend APIs and integrate automated workflows."
+            "tags": ["python", "django", "fastapi", "sql", "git", "docker"],
+            "description": "Develop and maintain robust backend microservices, REST APIs, and automated data pipelines using Python and Docker."
         },
         {
-            "title": "AI & ML Intern",
+            "id": 2,
+            "title": "AI & ML Engineer Intern",
             "company": "Microsoft",
             "location": "Hyderabad, India / Remote",
             "url": "https://careers.microsoft.com",
-            "tags": ["python", "ai", "machine learning", "nlp"],
-            "description": "Join our AI research team to build NLP matching algorithms and integrate large language model agents."
+            "tags": ["python", "machine learning", "nlp", "pytorch", "pandas", "llm"],
+            "description": "Collaborate on LLM fine-tuning, prompt engineering frameworks, and natural language matching algorithms with PyTorch and NLP."
         },
         {
-            "title": "Full Stack Developer",
+            "id": 3,
+            "title": "Full Stack Software Engineer",
             "company": "Amazon",
             "location": "Remote",
             "url": "https://amazon.jobs",
-            "tags": ["react", "node", "python", "aws"],
-            "description": "Develop high-scale web platforms and microservices using modern frontend frameworks and Python services."
+            "tags": ["react", "node.js", "python", "aws", "typescript", "sql"],
+            "description": "Design customer-facing web applications using React, modern Node microservices, and scalable AWS cloud infrastructure."
         },
         {
+            "id": 4,
             "title": "Data Analyst Trainee",
             "company": "Deloitte",
             "location": "Mumbai, India",
             "url": "https://deloitte.com/careers",
-            "tags": ["python", "sql", "power bi", "data"],
-            "description": "Analyze large business datasets, build interactive dashboards, and optimize ETL data pipelines."
+            "tags": ["python", "sql", "power bi", "pandas", "tableau", "data analysis"],
+            "description": "Perform exploratory data analysis, build business intelligence dashboards using Power BI and Tableau, and optimize SQL queries."
         },
         {
-            "title": "Software Engineer (Backend)",
+            "id": 5,
+            "title": "Cloud & DevOps Associate",
             "company": "TCS",
             "location": "Chennai, India",
             "url": "https://tcs.com/careers",
-            "tags": ["java", "python", "sql", "api"],
-            "description": "Responsible for developing robust enterprise backend systems, database schemas, and REST APIs."
+            "tags": ["aws", "azure", "docker", "kubernetes", "linux", "ci/cd"],
+            "description": "Manage cloud deployments, implement CI/CD pipelines, containerize backend microservices, and ensure cluster scalability."
         }
     ]
 
-    # Filter based on search input
     tag_lower = tag.lower().strip()
     filtered = []
     
@@ -54,10 +56,8 @@ def fetch_jobs(tag: str = "python", limit: int = 10) -> list:
         title = job["title"].lower()
         company = job["company"].lower()
         
-        # Match if search keyword is in tags, title, or company name
-        if tag_lower in tags or tag_lower in title or tag_lower in company:
+        if not tag_lower or tag_lower in tags or tag_lower in title or tag_lower in company:
             filtered.append(job)
             
-    # If no specific keyword matched, return all jobs up to limit
     results = filtered if filtered else custom_jobs
     return results[:limit]
