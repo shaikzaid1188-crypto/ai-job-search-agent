@@ -1,4 +1,6 @@
 import streamlit as st
+
+# Custom module imports
 from src.parser import extract_text_from_pdf
 from src.job_api import fetch_jobs
 from src.ai_matcher import extract_skills_from_resume, calculate_job_match, analyze_skill_gap
@@ -10,106 +12,114 @@ st.set_page_config(
     layout="wide"
 )
 
+# --- SIDEBAR: Resume Upload ---
+with st.sidebar:
+    st.header("📄 1. Upload Resume")
+    uploaded_file = st.file_uploader("Upload PDF Resume", type=["pdf"])
+    
+    resume_text = ""
+    resume_skills = []
+    
+    if uploaded_file is not None:
+        try:
+            resume_text = extract_text_from_pdf(uploaded_file)
+            st.success(f"Uploaded: {uploaded_file.name}")
+            
+            # Extract skills using the matcher module
+            resume_skills = extract_skills_from_resume(resume_text)
+            
+            with st.expander("Detected Skills"):
+                if resume_skills:
+                    st.write(", ".join(resume_skills))
+                else:
+                    st.caption("No standard skills parsed.")
+                    
+            with st.expander("Preview Extracted Text"):
+                st.caption(resume_text[:400] + "...")
+        except Exception as e:
+            st.error(f"Error reading PDF: {e}")
+    else:
+        st.info("Upload a PDF resume to enable match scores and AI generation tools.")
+
+# --- MAIN CONTENT ---
 st.title("💼 AI Job Search & Resume Assistant")
 st.write("Upload your resume to discover matching job opportunities, skill gap analysis, and tailored AI recommendations.")
 
-# --- Sidebar: Resume Upload & Skill Extraction ---
-st.sidebar.header("📄 1. Upload Resume")
-uploaded_file = st.sidebar.file_uploader("Upload PDF Resume", type=["pdf"])
-
-resume_text = ""
-resume_skills = []
-
-if uploaded_file:
-    with st.sidebar.status("Processing Resume..."):
-        resume_text = extract_text_from_pdf(uploaded_file)
-        resume_skills = extract_skills_from_resume(resume_text)
-    
-    st.sidebar.success(f"Extracted {len(resume_skills)} Skills!")
-    if resume_skills:
-        st.sidebar.subheader("Detected Skills:")
-        st.sidebar.write(", ".join(resume_skills))
-else:
-    st.sidebar.info("Upload a PDF resume to enable match scores and AI generation tools.")
-
-# --- Search & Sorting ---
-col_search, col_sort = st.columns([3, 1])
-with col_search:
+col1, col2 = st.columns([3, 1])
+with col1:
     search_query = st.text_input("🔍 Search roles, companies, or keywords", value="python")
-with col_sort:
-    sort_by_match = st.selectbox("Sort By", ["Highest Match %", "Default Feed"])
+with col2:
+    sort_option = st.selectbox("Sort By", ["Highest Match %", "Newest"])
 
-# --- Fetch & Enrich Listings ---
-job_listings = fetch_jobs(tag=search_query, limit=10)
-enriched_jobs = []
+# Fetch live jobs from the Remotive API
+with st.spinner("Fetching live remote jobs..."):
+    jobs = fetch_jobs(search_query=search_query, limit=15)
 
-for job in job_listings:
-    score = calculate_job_match(resume_skills, job["tags"], job["description"]) if resume_skills else 0
-    gap = analyze_skill_gap(resume_skills, job["tags"])
-    enriched_jobs.append({
-        **job,
-        "match_score": score,
-        "matching_skills": gap["matching"],
-        "missing_skills": gap["missing"]
-    })
+# Calculate match metrics using ai_matcher
+for job in jobs:
+    if resume_text:
+        job["match_score"] = calculate_job_match(resume_text, job.get("tags", []), job.get("description", ""))
+        job["missing_skills"] = analyze_skill_gap(resume_skills, job.get("tags", []))
+    else:
+        job["match_score"] = 0
+        job["missing_skills"] = []
 
-if sort_by_match == "Highest Match %" and resume_skills:
-    enriched_jobs.sort(key=lambda x: x["match_score"], reverse=True)
+# Sort listings
+if sort_option == "Highest Match %" and resume_text:
+    jobs = sorted(jobs, key=lambda x: x.get("match_score", 0), reverse=True)
 
-# --- Listings Feed ---
-st.subheader(f"📋 Available Opportunities ({len(enriched_jobs)})")
+st.subheader(f"📋 Available Opportunities ({len(jobs)})")
 
-for job in enriched_jobs:
-    with st.container(border=True):
-        col1, col2 = st.columns([3, 1])
+if not jobs:
+    st.warning("No live jobs found matching your criteria. Try searching for terms like 'python', 'react', 'data', or 'engineer'.")
+
+# Render Job Listings
+for i, job in enumerate(jobs):
+    with st.container():
+        st.markdown("---")
+        title_col, btn_col = st.columns([4, 1])
         
-        with col1:
-            st.markdown(f"### [{job['title']}]({job['url']})")
-            st.markdown(f"🏢 **{job['company']}** &nbsp;|&nbsp; 📍 {job['location']}")
-            st.write(job['description'])
+        with title_col:
+            st.markdown(f"### [{job.get('title', 'Role')}]({job.get('url', '#')})")
+            st.write(f"🏢 **{job.get('company', 'Company')}** | 📍 {job.get('location', 'Remote')}")
+        
+        with btn_col:
+            if job.get("url"):
+                st.link_button("Apply on Portal ↗", job["url"])
+            if resume_text:
+                st.metric("Match Score", f"{job['match_score']}%")
+
+        # Description Preview
+        desc = job.get("description", "")
+        preview_desc = desc[:300] + "..." if len(desc) > 300 else desc
+        st.write(preview_desc)
+
+        # Tags
+        if job.get("tags"):
+            tags_html = " ".join([f"`{t}`" for t in job["tags"][:8]])
+            st.markdown(f"**Required Tags:** {tags_html}")
+
+        # AI Tools
+        if resume_text:
+            col_a, col_b = st.columns(2)
             
-            tags_display = " ".join([f"`{t}`" for t in job["tags"]])
-            st.markdown(f"**Required Tags:** {tags_display}")
+            with col_a:
+                if st.button("✨ Generate Cover Letter", key=f"cl_{job.get('id', i)}_{i}"):
+                    with st.spinner("Drafting cover letter with Gemini..."):
+                        letter = generate_cover_letter(
+                            resume_text=resume_text,
+                            job_title=job.get("title", ""),
+                            company=job.get("company", ""),
+                            job_desc=job.get("description", "")
+                        )
+                        st.text_area("Tailored Cover Letter", letter, height=250)
             
-            if uploaded_file and resume_skills:
-                m_col, g_col = st.columns(2)
-                with m_col:
-                    st.markdown(f"✅ **Matching:** `{', '.join(job['matching_skills']) or 'None'}`")
-                with g_col:
-                    st.markdown(f"⚠️ **Skill Gaps:** `{', '.join(job['missing_skills']) or 'None'}`")
-
-        with col2:
-            if uploaded_file and resume_skills:
-                st.metric("AI Fit Score", f"{job['match_score']}%")
-                st.progress(job['match_score'] / 100)
-            st.link_button("Apply on Portal ↗", job['url'], use_container_width=True)
-
-        # AI Assistant Expander for each role
-        if uploaded_file:
-            with st.expander(f"🤖 AI Assistant for {job['title']}"):
-                tab1, tab2 = st.tabs(["📝 Tailored Cover Letter", "💡 Resume Optimization Tips"])
-                
-                with tab1:
-                    if st.button(f"Generate Cover Letter for {job['company']}", key=f"cl_{job['id']}"):
-                        with st.spinner("Drafting cover letter..."):
-                            letter = generate_cover_letter(resume_text, job["title"], job["company"], job["description"])
-                            st.text_area("Customized Cover Letter", letter, height=220)
-                            
-                            # One-click download button
-                            clean_filename = f"{job['company']}_{job['title']}_Cover_Letter.txt".replace(" ", "_")
-                            st.download_button(
-                                label="💾 Download Cover Letter (.txt)",
-                                data=letter,
-                                file_name=clean_filename,
-                                mime="text/plain",
-                                key=f"dl_{job['id']}"
-                            )
-                
-                with tab2:
-                    if st.button(f"Get Tailoring Tips for {job['company']}", key=f"tips_{job['id']}"):
-                        with st.spinner("Analyzing resume against role requirements..."):
-                            tips = generate_resume_tips(resume_text, job["description"], job["missing_skills"])
-                            st.markdown(tips)
-
-st.markdown("---")
-st.caption("AI Job Search & Resume Matcher Assistant | Final Week 4 Build")
+            with col_b:
+                if st.button("🎯 Resume Improvement Tips", key=f"tips_{job.get('id', i)}_{i}"):
+                    with st.spinner("Analyzing skill gaps with Gemini..."):
+                        tips = generate_resume_tips(
+                            resume_text=resume_text,
+                            job_desc=job.get("description", ""),
+                            missing_skills=job.get("missing_skills", [])
+                        )
+                        st.info(tips)
