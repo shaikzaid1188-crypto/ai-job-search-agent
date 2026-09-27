@@ -1,200 +1,139 @@
 import streamlit as st
-from src.parser import extract_text_from_pdf, extract_skills
+from src.parser import extract_text, extract_skills
 from src.job_api import fetch_jobs
-from src.ai_matcher import calculate_match
-from src.ai_generator import generate_cover_letter, generate_resume_tips
+from src.ai_matcher import calculate_ats_match
+from src.ai_generator import generate_cover_letter
 
 st.set_page_config(
     page_title="AI Job Search & Resume Assistant",
     page_icon="⚡",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
-# Custom Sleek CSS Styling
 st.markdown("""
 <style>
-    /* Gradient Headers */
-    .hero-title {
-        font-size: 2.3rem;
-        font-weight: 800;
-        background: linear-gradient(90deg, #6366F1 0%, #A855F7 50%, #EC4899 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin-bottom: 0.2rem;
+    .metric-card {
+        background-color: #1e2130;
+        border-radius: 10px;
+        padding: 16px;
+        border: 1px solid #2e344e;
+        margin-bottom: 12px;
     }
-    .hero-sub {
-        color: #9CA3AF;
-        font-size: 1.05rem;
-        margin-bottom: 2rem;
-    }
-    
-    /* Job Cards */
-    .job-card {
-        background: rgba(17, 24, 39, 0.7);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 14px;
-        padding: 22px;
-        margin-bottom: 16px;
-        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
-        backdrop-filter: blur(8px);
-        transition: transform 0.2s ease, border-color 0.2s ease;
-    }
-    .job-card:hover {
-        border-color: rgba(99, 102, 241, 0.4);
-        transform: translateY(-2px);
-    }
-    
-    /* Glowing Skill Chips */
     .skill-badge {
         display: inline-block;
-        background: rgba(99, 102, 241, 0.15);
-        color: #818CF8;
-        border: 1px solid rgba(99, 102, 241, 0.3);
+        background-color: #2b314e;
+        color: #90caf9;
         border-radius: 6px;
-        padding: 3px 9px;
-        font-size: 0.78rem;
-        font-weight: 600;
-        margin: 3px 3px 3px 0;
-    }
-
-    /* Streamlit Button Overrides */
-    .stButton > button {
-        border-radius: 8px;
-        font-weight: 600;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        transition: all 0.2s ease-in-out;
-    }
-    .stButton > button:hover {
-        border-color: #6366F1;
-        box-shadow: 0 0 12px rgba(99, 102, 241, 0.35);
+        padding: 3px 8px;
+        margin: 2px;
+        font-size: 0.85rem;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Main Title Section
-st.markdown('<div class="hero-title">⚡ AI Job Search & Resume Assistant</div>', unsafe_allow_html=True)
-st.markdown('<div class="hero-sub">Accelerate your tech job search across India with automated ATS scoring & generative cover letters.</div>', unsafe_allow_html=True)
+# ----------------- SIDEBAR: RESUME UPLOAD & PARSING -----------------
+with st.sidebar:
+    st.header("📄 1. Candidate Resume")
+    uploaded_file = st.file_uploader("Upload Resume (.pdf or .docx)", type=["pdf", "docx"])
 
-# Sidebar: Resume upload & Filters
-st.sidebar.markdown("### 📄 1. Candidate Resume")
-uploaded_file = st.sidebar.file_uploader("Upload PDF Resume", type=["pdf"])
+    resume_text = ""
+    detected_skills = []
 
-resume_text = ""
-resume_skills = []
+    if uploaded_file is not None:
+        try:
+            resume_text = extract_text(uploaded_file)
+            detected_skills = extract_skills(resume_text)
+            st.success(f"✓ Uploaded: {uploaded_file.name}")
+        except Exception as e:
+            st.error(f"Error parsing resume: {e}")
 
-if uploaded_file:
-    with st.spinner("Extracting text and technical skills..."):
-        resume_text = extract_text_from_pdf(uploaded_file)
-        resume_skills = extract_skills(resume_text)
-    
-    st.sidebar.success(f"✓ Uploaded: {uploaded_file.name}")
-    
-    with st.sidebar.expander("✨ Detected Resume Skills", expanded=True):
-        if resume_skills:
-            badges_html = "".join([f'<span class="skill-badge">{s}</span>' for s in resume_skills])
-            st.markdown(badges_html, unsafe_allow_html=True)
-        else:
-            st.write("No common tech keywords found.")
-            
-    with st.sidebar.expander("🔍 Extracted Text Preview", expanded=False):
-        st.text(resume_text[:400] + "..." if len(resume_text) > 400 else resume_text)
+    if detected_skills:
+        with st.expander("✨ Detected Resume Skills", expanded=True):
+            skill_html = "".join([f"<span class='skill-badge'>{skill}</span>" for skill in detected_skills])
+            st.markdown(skill_html, unsafe_allow_html=True)
 
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 📍 2. Preferences")
-selected_location = st.sidebar.selectbox(
-    "Preferred Hub / City",
-    ["All Locations", "Bengaluru", "Pune", "Gurugram", "Chennai", "Hyderabad", "Remote"]
-)
+    if resume_text:
+        with st.expander("🔍 Extracted Text Preview"):
+            st.text_area("Resume Content", resume_text[:1200] + ("..." if len(resume_text) > 1200 else ""), height=180)
 
-# Search Bar Area
-search_col1, search_col2 = st.columns([3, 1])
-with search_col1:
-    search_keyword = st.text_input("🔍 Search Role, Skill, or Tech Stack", value="Python")
-with search_col2:
+# ----------------- MAIN APP: SEARCH & JOB MATCHING -----------------
+st.title("⚡ AI Job Search & Resume Assistant")
+st.caption("Accelerate your tech job search across India with automated ATS scoring & generative cover letters.")
+
+default_search = detected_skills[0].title() if detected_skills else "Python Developer"
+
+col_search, col_filter, col_btn = st.columns([3, 2, 1])
+
+with col_search:
+    search_query = st.text_input("🔍 Search Role, Skill, or Tech Stack", value=default_search)
+
+with col_filter:
+    target_company = st.selectbox(
+        "🏢 Target Company",
+        [
+            "All Companies",
+            "TCS",
+            "Infosys",
+            "Wipro",
+            "Google",
+            "Microsoft",
+            "Amazon",
+            "Accenture",
+            "Cognizant",
+            "IBM",
+            "Oracle",
+            "HCL"
+        ]
+    )
+
+with col_btn:
     st.write("")
-    refresh_button = st.button("Find Opportunities", use_container_width=True)
+    search_clicked = st.button("Find Opportunities", use_container_width=True)
 
-# Fetch jobs
-jobs = fetch_jobs(query=search_keyword)
+if search_query or search_clicked:
+    display_company = f"at {target_company}" if target_company != "All Companies" else "across India"
+    with st.spinner(f"Fetching live openings for '{search_query}' {display_company}..."):
+        jobs = fetch_jobs(query=search_query, company=target_company)
 
-if selected_location != "All Locations":
-    jobs = [
-        job for job in jobs 
-        if selected_location.lower() in job.get("candidate_required_location", "").lower()
-    ]
+    if not jobs:
+        st.warning(f"No job openings found matching '{search_query}' {display_company}. Try selecting 'All Companies' or a different role.")
+    else:
+        st.subheader(f"💼 Open Opportunities ({len(jobs)} Found)")
 
-st.markdown("---")
-
-if not jobs:
-    st.warning(f"No job openings found matching '{search_keyword}' in '{selected_location}'. Try another keyword or location.")
-else:
-    for job in jobs:
-        score, matched_skills, missing_skills = calculate_match(resume_skills, job["tags"])
-        
-        # Color coding score
-        if score >= 70:
-            score_pill = f'<span style="color:#10B981; font-size: 1.4rem; font-weight:700;">🟢 {score}% Match</span>'
-        elif score >= 40:
-            score_pill = f'<span style="color:#FBBF24; font-size: 1.4rem; font-weight:700;">🟡 {score}% Match</span>'
-        else:
-            score_pill = f'<span style="color:#EF4444; font-size: 1.4rem; font-weight:700;">🔴 {score}% Match</span>'
-
-        tags_html = "".join([f'<span class="skill-badge">{t}</span>' for t in job["tags"]])
-
-        # Glassmorphic Job Card
-        card_html = f"""
-        <div class="job-card">
-            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                <div>
-                    <h3 style="margin: 0 0 6px 0; color: #FFFFFF;">{job['title']}</h3>
-                    <p style="margin: 0 0 10px 0; color: #9CA3AF;">🏢 <b>{job['company_name']}</b> &nbsp;|&nbsp; 📍 {job['candidate_required_location']}</p>
-                </div>
-                <div>{score_pill}</div>
-            </div>
-            <p style="color: #D1D5DB; font-size: 0.95rem; margin-bottom: 12px;">{job['description'][:280]}...</p>
-            <div>{tags_html}</div>
-        </div>
-        """
-        st.markdown(card_html, unsafe_allow_html=True)
-        
-        # Action Buttons
-        col_btn1, col_btn2, col_btn3 = st.columns([2, 2, 6])
-        with col_btn1:
-            if st.button("✨ Cover Letter", key=f"cl_{job['id']}"):
-                if not resume_text:
-                    st.error("Please upload your resume first!")
-                else:
-                    with st.spinner("Generating letter..."):
-                        letter = generate_cover_letter(resume_text, job["title"], job["company_name"], job["description"])
-                        st.session_state[f"cover_letter_{job['id']}"] = letter
-
-        with col_btn2:
-            if st.button("🎯 ATS Advice", key=f"tips_{job['id']}"):
-                if not resume_text:
-                    st.error("Please upload your resume first!")
-                else:
-                    with st.spinner("Analyzing keyword gaps..."):
-                        tips = generate_resume_tips(resume_text, job["description"], missing_skills)
-                        st.session_state[f"tips_{job['id']}"] = tips
-                        
-        with col_btn3:
-            st.link_button("Apply on Portal ↗", job["url"])
-
-        # Generated Output Containers
-        if f"cover_letter_{job['id']}" in st.session_state:
-            letter_content = st.session_state[f"cover_letter_{job['id']}"]
-            st.markdown("**Tailored Cover Letter**")
-            st.text_area("", value=letter_content, height=220, key=f"txt_cl_{job['id']}")
-            st.download_button(
-                label="💾 Download as .txt",
-                data=letter_content,
-                file_name=f"Cover_Letter_{job['company_name']}.txt",
-                mime="text/plain",
-                key=f"dl_{job['id']}"
+        for idx, job in enumerate(jobs):
+            score, matching_skills, missing_skills = calculate_ats_match(
+                detected_skills,
+                job,
+                job_description=f"{job.get('title', '')} {job.get('description', '')}"
             )
-            
-        if f"tips_{job['id']}" in st.session_state:
-            st.info(st.session_state[f"tips_{job['id']}"])
-            
-        st.write("")
+
+            with st.container():
+                c1, c2 = st.columns([3, 1])
+                with c1:
+                    st.markdown(f"### [{job.get('title')}]({job.get('url')})")
+                    st.markdown(f"**🏢 {job.get('company_name')}**  |  📍 {job.get('candidate_required_location')}")
+                    st.write(job.get("description", "No description provided.")[:320] + "...")
+
+                    if matching_skills:
+                        matched_html = " ".join([f"<span class='skill-badge' style='color:#a7f3d0;'>✓ {s}</span>" for s in matching_skills])
+                        st.markdown(f"**Matches:** {matched_html}", unsafe_allow_html=True)
+
+                with c2:
+                    if detected_skills:
+                        st.metric("ATS Match", f"{score}%")
+
+                    st.link_button("Apply Directly ↗", job.get("url", "#"), use_container_width=True)
+
+                    if st.button("Generate Cover Letter", key=f"btn_cov_{idx}", use_container_width=True):
+                        if not resume_text:
+                            st.warning("Please upload your resume in the sidebar first!")
+                        else:
+                            with st.spinner("Drafting targeted cover letter..."):
+                                letter = generate_cover_letter(resume_text, job.get("description", ""))
+                                st.session_state[f"letter_{idx}"] = letter
+
+                if f"letter_{idx}" in st.session_state:
+                    with st.expander("📝 Tailored Cover Letter", expanded=True):
+                        st.text_area("Cover Letter", value=st.session_state[f"letter_{idx}"], height=240)
+
+                st.divider()

@@ -1,88 +1,110 @@
+import os
 import requests
+import re
+from dotenv import load_dotenv
 
-INDIA_COMPANIES_DATABASE = [
-    {
-        "id": "ind-1",
-        "title": "Python Backend Engineer",
-        "company_name": "Razorpay",
-        "candidate_required_location": "Bengaluru, Karnataka, India",
-        "url": "https://razorpay.com/jobs",
-        "tags": ["python", "django", "fastapi", "sql", "redis", "docker"],
-        "description": "Build high-throughput, fault-tolerant payment gateway microservices. Collaborate with platform engineers to design scalable REST and gRPC APIs using Python, PostgreSQL, and AWS."
-    },
-    {
-        "id": "ind-2",
-        "title": "Software Development Engineer (Python / SDE-1)",
-        "company_name": "Swiggy",
-        "candidate_required_location": "Bengaluru, Karnataka / Remote (India)",
-        "url": "https://careers.swiggy.com",
-        "tags": ["python", "django", "aws", "docker", "rest"],
-        "description": "Develop and maintain core delivery and order management dispatch services. Optimize database queries in PostgreSQL and manage asynchronous tasks using Redis and Kafka."
-    },
-    {
-        "id": "ind-3",
-        "title": "Backend Platform Engineer",
-        "company_name": "PhonePe",
-        "candidate_required_location": "Pune, Maharashtra, India",
-        "url": "https://www.phonepe.com/careers",
-        "tags": ["python", "fastapi", "sql", "kubernetes", "aws"],
-        "description": "Engineer highly secure transaction platforms and settlement infrastructure handling millions of daily UPI operations with Python and cloud services."
-    },
-    {
-        "id": "ind-4",
-        "title": "Full Stack Web Developer",
-        "company_name": "Zoho",
-        "candidate_required_location": "Chennai, Tamil Nadu, India",
-        "url": "https://www.zoho.com/careers",
-        "tags": ["javascript", "react", "python", "html", "css", "sql"],
-        "description": "Build responsive SaaS interfaces and robust backend integration APIs for Zoho Workplace suites using React, Python, and relational database systems."
-    },
-    {
-        "id": "ind-5",
-        "title": "Data & Backend Engineer",
-        "company_name": "Zomato",
-        "candidate_required_location": "Gurugram, Haryana, India",
-        "url": "https://www.zomato.com/careers",
-        "tags": ["python", "sql", "redis", "fastapi", "docker"],
-        "description": "Design live kitchen event streaming pipelines and RESTful microservices supporting real-time tracking, customer notifications, and partner dashboard APIs."
+load_dotenv(override=True)
+
+RAPIDAPI_KEY = None
+try:
+    import streamlit as st
+    if hasattr(st, "secrets") and "RAPIDAPI_KEY" in st.secrets:
+        RAPIDAPI_KEY = st.secrets["RAPIDAPI_KEY"]
+except Exception:
+    pass
+
+if not RAPIDAPI_KEY:
+    RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "")
+
+
+def clean_html(raw_html: str) -> str:
+    """Strips HTML tags and normalizes whitespace."""
+    cleanr = re.compile(r"<.*?>")
+    cleaned = re.sub(cleanr, "", raw_html or "")
+    return " ".join(cleaned.split())
+
+
+def _call_api(query_str: str) -> list:
+    """Queries JSearch search-v2 endpoint on RapidAPI."""
+    url = "https://jsearch.p.rapidapi.com/search-v2"
+    headers = {
+        "x-rapidapi-key": RAPIDAPI_KEY.strip() if RAPIDAPI_KEY else "",
+        "x-rapidapi-host": "jsearch.p.rapidapi.com"
     }
-]
+    querystring = {
+        "query": query_str,
+        "country": "in",
+        "page": "1",
+        "num_pages": "1"
+    }
 
-def fetch_jobs(query: str = "python", *args, **kwargs) -> list:
-    """
-    Fetches curated Indian tech roles and live remote listings.
-    Accepts arbitrary args/kwargs to avoid signature mismatches with Streamlit cache wrappers.
-    """
-    url = f"https://remotive.com/api/remote-jobs?search={query}&limit=10"
-    jobs = []
-    
     try:
-        response = requests.get(url, timeout=5)
+        response = requests.get(url, headers=headers, params=querystring, timeout=12)
         if response.status_code == 200:
-            data = response.json().get("jobs", [])
-            for item in data:
-                location = item.get("candidate_required_location", "").lower()
-                if any(k in location for k in ["india", "worldwide", "anywhere"]):
-                    jobs.append({
-                        "id": str(item.get("id")),
-                        "title": item.get("title"),
-                        "company_name": item.get("company_name"),
-                        "candidate_required_location": item.get("candidate_required_location", "Remote"),
-                        "url": item.get("url"),
-                        "tags": [t.lower() for t in item.get("tags", [])],
-                        "description": item.get("description", "")
-                    })
-    except Exception:
-        pass
+            res_json = response.json()
+            data = res_json.get("data", [])
+            if isinstance(data, dict):
+                data = data.get("jobs", [])
 
-    combined = INDIA_COMPANIES_DATABASE + jobs
-    
-    seen = set()
-    unique_jobs = []
-    for j in combined:
-        key = (j["title"].lower(), j["company_name"].lower())
-        if key not in seen:
-            seen.add(key)
-            unique_jobs.append(j)
-            
-    return unique_jobs
+            parsed_jobs = []
+            for item in data:
+                tags = [t.lower() for t in (item.get("job_required_skills") or []) if t]
+                if not tags:
+                    tags = [w.lower() for w in re.findall(r"\b[A-Za-z]{3,}\b", item.get("job_title", ""))]
+
+                city = item.get("job_city") or ""
+                state = item.get("job_state") or ""
+                loc_parts = [p for p in [city, state, "India"] if p]
+                location = ", ".join(loc_parts) if loc_parts else "India (Remote/Hybrid)"
+
+                parsed_jobs.append({
+                    "id": item.get("job_id", ""),
+                    "title": item.get("job_title", "Position Title Not Listed"),
+                    "company_name": item.get("employer_name", "Confidential"),
+                    "candidate_required_location": location,
+                    "url": item.get("job_apply_link") or item.get("job_google_link") or "#",
+                    "tags": tags,
+                    "description": clean_html(item.get("job_description", "")[:600])
+                })
+            return parsed_jobs
+        else:
+            print(f"JSearch Response Error: {response.status_code} - {response.text}")
+    except Exception as e:
+        print(f"Error querying JSearch: {e}")
+
+    return []
+
+
+def fetch_jobs(query: str = "Python", company: str = "All Companies", *args, **kwargs) -> list:
+    """
+    Fetches real-time Indian job postings and strictly validates genuine employer matches.
+    """
+    clean_query = query.strip() if query else "Python Developer"
+
+    if company and company != "All Companies":
+        # Formulate query for the exact employer
+        search_term = f'"{company}" {clean_query} jobs in India'
+        results = _call_api(search_term)
+
+        # Filter strictly by company name
+        exact_matches = [
+            j for j in results 
+            if company.lower() in j.get("company_name", "").lower()
+        ]
+
+        if exact_matches:
+            return exact_matches
+
+        # If strict match didn't catch enough, try direct company name query
+        direct_results = _call_api(f'jobs at {company} India')
+        company_filtered = [
+            j for j in direct_results 
+            if company.lower() in j.get("company_name", "").lower()
+        ]
+        if company_filtered:
+            return company_filtered
+
+        return results
+
+    # General search
+    return _call_api(f"{clean_query} in India")
