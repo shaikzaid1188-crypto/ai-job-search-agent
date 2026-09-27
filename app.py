@@ -93,9 +93,11 @@ with col_btn:
 if search_query or search_clicked:
     display_company = f"at {target_company}" if target_company != "All Companies" else "across India"
     with st.spinner(f"Fetching live openings for '{search_query}' {display_company}..."):
-        jobs = fetch_jobs(query=search_query, company=target_company)
+        jobs, error_msg = fetch_jobs(query=search_query, company=target_company)
 
-    if not jobs:
+    if error_msg:
+        st.error(f"⚠️ {error_msg}")
+    elif not jobs:
         st.warning(f"No job openings found matching '{search_query}' {display_company}. Try selecting 'All Companies' or a different role.")
     else:
         st.subheader(f"💼 Open Opportunities ({len(jobs)} Found)")

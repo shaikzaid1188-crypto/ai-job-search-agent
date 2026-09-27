@@ -5,16 +5,20 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-RAPIDAPI_KEY = None
-try:
-    import streamlit as st
-    if hasattr(st, "secrets") and "RAPIDAPI_KEY" in st.secrets:
-        RAPIDAPI_KEY = st.secrets["RAPIDAPI_KEY"]
-except Exception:
-    pass
 
-if not RAPIDAPI_KEY:
-    RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "")
+def get_rapidapi_key() -> str:
+    """Dynamically fetches the RapidAPI key from Streamlit secrets or env vars."""
+    key = ""
+    try:
+        import streamlit as st
+        if hasattr(st, "secrets") and "RAPIDAPI_KEY" in st.secrets:
+            key = st.secrets["RAPIDAPI_KEY"]
+    except Exception:
+        pass
+
+    if not key:
+        key = os.getenv("RAPIDAPI_KEY", "")
+    return key.strip() if key else ""
 
 
 def clean_html(raw_html: str) -> str:
@@ -24,11 +28,17 @@ def clean_html(raw_html: str) -> str:
     return " ".join(cleaned.split())
 
 
-def _call_api(query_str: str) -> list:
-    """Queries JSearch search-v2 endpoint on RapidAPI."""
+def _call_api(query_str: str) -> tuple[list, str]:
+    """Queries JSearch search-v2 endpoint on RapidAPI and returns (jobs, error_message)."""
+    api_key = get_rapidapi_key()
+    if not api_key:
+        err = "RAPIDAPI_KEY is missing or empty. Please check your Streamlit Cloud Secrets."
+        print(f"[JSearch Error] {err}")
+        return [], err
+
     url = "https://jsearch.p.rapidapi.com/search-v2"
     headers = {
-        "x-rapidapi-key": RAPIDAPI_KEY.strip() if RAPIDAPI_KEY else "",
+        "x-rapidapi-key": api_key,
         "x-rapidapi-host": "jsearch.p.rapidapi.com"
     }
     querystring = {
@@ -66,45 +76,36 @@ def _call_api(query_str: str) -> list:
                     "tags": tags,
                     "description": clean_html(item.get("job_description", "")[:600])
                 })
-            return parsed_jobs
+            return parsed_jobs, ""
         else:
-            print(f"JSearch Response Error: {response.status_code} - {response.text}")
+            err = f"API Error {response.status_code}: {response.text}"
+            print(f"[JSearch Error] {err}")
+            return [], err
     except Exception as e:
-        print(f"Error querying JSearch: {e}")
+        err = f"Request failed: {e}"
+        print(f"[JSearch Exception] {err}")
+        return [], err
 
-    return []
 
-
-def fetch_jobs(query: str = "Python", company: str = "All Companies", *args, **kwargs) -> list:
+def fetch_jobs(query: str = "Python", company: str = "All Companies", *args, **kwargs) -> tuple[list, str]:
     """
-    Fetches real-time Indian job postings and strictly validates genuine employer matches.
+    Fetches real-time Indian job postings targeting specific enterprises or broad searches.
+    Returns (jobs, error_message).
     """
     clean_query = query.strip() if query else "Python Developer"
 
     if company and company != "All Companies":
-        # Formulate query for the exact employer
         search_term = f'"{company}" {clean_query} jobs in India'
-        results = _call_api(search_term)
-
-        # Filter strictly by company name
-        exact_matches = [
-            j for j in results 
-            if company.lower() in j.get("company_name", "").lower()
-        ]
-
+        jobs, err = _call_api(search_term)
+        exact_matches = [j for j in jobs if company.lower() in j.get("company_name", "").lower()]
         if exact_matches:
-            return exact_matches
+            return exact_matches, ""
 
-        # If strict match didn't catch enough, try direct company name query
-        direct_results = _call_api(f'jobs at {company} India')
-        company_filtered = [
-            j for j in direct_results 
-            if company.lower() in j.get("company_name", "").lower()
-        ]
+        direct_results, err = _call_api(f'jobs at {company} India')
+        company_filtered = [j for j in direct_results if company.lower() in j.get("company_name", "").lower()]
         if company_filtered:
-            return company_filtered
+            return company_filtered, ""
 
-        return results
+        return jobs, err
 
-    # General search
     return _call_api(f"{clean_query} in India")
