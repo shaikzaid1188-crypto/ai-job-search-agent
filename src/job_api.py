@@ -1,6 +1,7 @@
 import os
 import requests
 import re
+import time
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
@@ -29,11 +30,10 @@ def clean_html(raw_html: str) -> str:
 
 
 def _call_api(query_str: str) -> tuple[list, str]:
-    """Queries JSearch search-v2 endpoint on RapidAPI and returns (jobs, error_message)."""
+    """Queries JSearch search-v2 endpoint on RapidAPI with extended timeout and retry."""
     api_key = get_rapidapi_key()
     if not api_key:
         err = "RAPIDAPI_KEY is missing or empty. Please check your Streamlit Cloud Secrets."
-        print(f"[JSearch Error] {err}")
         return [], err
 
     url = "https://jsearch.p.rapidapi.com/search-v2"
@@ -48,50 +48,52 @@ def _call_api(query_str: str) -> tuple[list, str]:
         "num_pages": "1"
     }
 
-    try:
-        response = requests.get(url, headers=headers, params=querystring, timeout=12)
-        if response.status_code == 200:
-            res_json = response.json()
-            data = res_json.get("data", [])
-            if isinstance(data, dict):
-                data = data.get("jobs", [])
+    # Attempt request with up to 1 retry on timeout
+    for attempt in range(2):
+        try:
+            response = requests.get(url, headers=headers, params=querystring, timeout=25)
+            if response.status_code == 200:
+                res_json = response.json()
+                data = res_json.get("data", [])
+                if isinstance(data, dict):
+                    data = data.get("jobs", [])
 
-            parsed_jobs = []
-            for item in data:
-                tags = [t.lower() for t in (item.get("job_required_skills") or []) if t]
-                if not tags:
-                    tags = [w.lower() for w in re.findall(r"\b[A-Za-z]{3,}\b", item.get("job_title", ""))]
+                parsed_jobs = []
+                for item in data:
+                    tags = [t.lower() for t in (item.get("job_required_skills") or []) if t]
+                    if not tags:
+                        tags = [w.lower() for w in re.findall(r"\b[A-Za-z]{3,}\b", item.get("job_title", ""))]
 
-                city = item.get("job_city") or ""
-                state = item.get("job_state") or ""
-                loc_parts = [p for p in [city, state, "India"] if p]
-                location = ", ".join(loc_parts) if loc_parts else "India (Remote/Hybrid)"
+                    city = item.get("job_city") or ""
+                    state = item.get("job_state") or ""
+                    loc_parts = [p for p in [city, state, "India"] if p]
+                    location = ", ".join(loc_parts) if loc_parts else "India (Remote/Hybrid)"
 
-                parsed_jobs.append({
-                    "id": item.get("job_id", ""),
-                    "title": item.get("job_title", "Position Title Not Listed"),
-                    "company_name": item.get("employer_name", "Confidential"),
-                    "candidate_required_location": location,
-                    "url": item.get("job_apply_link") or item.get("job_google_link") or "#",
-                    "tags": tags,
-                    "description": clean_html(item.get("job_description", "")[:600])
-                })
-            return parsed_jobs, ""
-        else:
-            err = f"API Error {response.status_code}: {response.text}"
-            print(f"[JSearch Error] {err}")
-            return [], err
-    except Exception as e:
-        err = f"Request failed: {e}"
-        print(f"[JSearch Exception] {err}")
-        return [], err
+                    parsed_jobs.append({
+                        "id": item.get("job_id", ""),
+                        "title": item.get("job_title", "Position Title Not Listed"),
+                        "company_name": item.get("employer_name", "Confidential"),
+                        "candidate_required_location": location,
+                        "url": item.get("job_apply_link") or item.get("job_google_link") or "#",
+                        "tags": tags,
+                        "description": clean_html(item.get("job_description", "")[:600])
+                    })
+                return parsed_jobs, ""
+            else:
+                return [], f"API Error {response.status_code}: {response.text}"
+        except requests.exceptions.Timeout:
+            if attempt == 0:
+                time.sleep(1)
+                continue
+            return [], "JSearch API took too long to respond. Please try clicking 'Find Opportunities' again."
+        except Exception as e:
+            return [], f"Request failed: {e}"
+
+    return [], "Unable to fetch jobs at this moment. Please try again."
 
 
 def fetch_jobs(query: str = "Python", company: str = "All Companies", *args, **kwargs) -> tuple[list, str]:
-    """
-    Fetches real-time Indian job postings targeting specific enterprises or broad searches.
-    Returns (jobs, error_message).
-    """
+    """Fetches real-time Indian job postings targeting specific enterprises or broad searches."""
     clean_query = query.strip() if query else "Python Developer"
 
     if company and company != "All Companies":
@@ -101,11 +103,11 @@ def fetch_jobs(query: str = "Python", company: str = "All Companies", *args, **k
         if exact_matches:
             return exact_matches, ""
 
-        direct_results, err = _call_api(f'jobs at {company} India')
+        direct_results, err = _call_api(f"jobs at {company} India")
         company_filtered = [j for j in direct_results if company.lower() in j.get("company_name", "").lower()]
         if company_filtered:
             return company_filtered, ""
 
         return jobs, err
 
-    return _call_api(f"{clean_query} in India")
+    return _call_api(f"{clean_query} jobs in India")
