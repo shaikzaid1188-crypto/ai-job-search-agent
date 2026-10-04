@@ -1,46 +1,30 @@
-# AI Job Search Agent
+# ⚡ AI Job Search & Resume Assistant
 
-## Project Overview
+An intelligent full-stack career platform built with Python and Streamlit that streamlines tech job hunting across India. The application pairs real-time job retrieval with automated resume skill extraction, ATS compatibility scoring, and context-tailored cover letter generation.
 
-AI-powered career assistant that helps students and job seekers find relevant job opportunities based on their resume, skills, education, and experience.
+🌐 **Live Demo:** [ai-job-search-agent](https://ai-job-search-agent-9w4yjz5yu5emjpoq6ifkpv.streamlit.app)
 
-## Problem Statement
+---
 
-Students and job seekers often struggle to find suitable job opportunities and understand whether their skills match a particular job.
+## 🚀 Key Features
+- **Real-Time Job Aggregation**: Connects to the JSearch `/search-v2` API via RapidAPI to query live tech roles across Indian metro hubs.
+- **Dynamic Resume Parser**: Extracts text and isolates key technical skills from both `.pdf` and `.docx` resumes.
+- **ATS Match Engine**: Performs keyword intersection analysis against job specifications to deliver immediate compatibility scores.
+- **Generative Cover Letters**: Leverages Google Gemini to generate role-aligned, 3-paragraph personalized application letters.
 
-## Proposed Solution
+---
 
-Our system will analyze a user's resume, extract relevant skills and experience, search for suitable job opportunities, and provide AI-powered job recommendations.
+## 🛠️ Tech Stack
+- **Frontend / Deployment**: Streamlit, Streamlit Community Cloud
+- **Backend / Core**: Python 3.12, Requests, Regular Expressions
+- **APIs**: RapidAPI (JSearch `/search-v2`), Google Generative AI (Gemini)
+- **Document Processing**: `pypdf`, `python-docx`
 
-## Planned Features
+---
 
-- Resume upload and parsing
-- Skill extraction
-- Job search
-- AI-based job matching
-- Job match score
-- Skill gap analysis
-- Company information
-- Career recommendations
+## 💻 Local Setup & Installation
 
-## Technology Stack
-
-- Python
-- Streamlit
-- LangChain
-- Job Search APIs
-- Large Language Model (LLM)
-
-## Project Workflow
-
-User Resume → Resume Parsing → Skill Extraction → Job Search → AI Job Matching → Match Score → Skill Gap Analysis → Career Recommendations
-
-## Team
-
-- SHAIK MOHAMMAD ZAID
-- D.SHAIK ABDUL SAMI
-- J.KOTESHWAR BABU
-
-## Internship
-
-Agentic AI Saksham Internship
+1. **Clone the repository:**
+   ```bash
+   git clone [https://github.com/shaikzaid1188-crypto/ai-job-search-agent.git](https://github.com/shaikzaid1188-crypto/ai-job-search-agent.git)
+   cd ai-job-search-agent
